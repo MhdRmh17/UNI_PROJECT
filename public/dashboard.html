@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>لوحة التحكم</title>
+
+  <!-- 1. فحص التوكن مبكّرًا وإعادة توجيه إن لم يكن موجود -->
+  <script>
+    (function(){
+      const token = localStorage.getItem('token');
+      if (!token) {
+        window.location.replace('/login.html');
+      }
+      // إذا وجدنا توكن، نسمح بعرض الـbody عبر إضافة كلاس
+      document.addEventListener('DOMContentLoaded', () => {
+        document.body.classList.add('authenticated');
+      });
+    })();
+  </script>
+
+  <style>
+    /* 2. إخفاء المحتوى مبدئيًا */
+    body { display: none; font-family: sans-serif; padding:20px; background:#fafafa; }
+    body.authenticated { display: block; }
+
+    .logout {
+      float: right;
+      padding: 6px 12px;
+      border: none;
+      background: #e74c3c;
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #projects-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 40px;
+    }
+    th, td {
+      padding: 10px;
+      border: 1px solid #ddd;
+      text-align: center;
+    }
+    thead { background: #f0f0f0; }
+    select.status-select,
+    button.info-btn,
+    button.download-btn {
+      padding: 4px 8px;
+      margin: 0 2px;
+      cursor: pointer;
+    }
+    button.info-btn { background: #3498db; color: #fff; border: none; border-radius: 4px; }
+    button.download-btn { background: #2ecc71; color: #fff; border: none; border-radius: 4px; }
+    #msg { margin-top: 20px; color: red; }
+  </style>
+</head>
+<body>
+  <button class="logout" id="logout">تسجيل خروج</button>
+  <h1>قائمة المشاريع</h1>
+  <table id="projects-table">
+    <thead>
+      <tr>
+        <th>العنوان</th>
+        <th>الوصف</th>
+        <th>الحالة</th>
+        <th>معلومات الطالب</th>
+        <th>تحميل PDF</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <div id="msg"></div>
+
+  <script>
+  (async function() {
+    const token = localStorage.getItem('token');
+    const loginPage = '/login.html';
+
+    // 3. زر تسجيل الخروج
+    document.getElementById('logout').addEventListener('click', () => {
+      localStorage.clear();
+      window.location.replace(loginPage);
+    });
+
+    // 4. جلب المشاريع
+    let projects;
+    try {
+      const res = await fetch('/api/projects', {
+        headers: { 'Authorization': `Bearer ${token}`, 'Accept':'application/json' }
+      });
+      if (res.status === 401 || res.status === 403) {
+        localStorage.clear();
+        return window.location.replace(loginPage);
+      }
+      if (!res.ok) throw new Error(`خطأ: ${res.status}`);
+      projects = await res.json();
+    } catch (err) {
+      console.error(err);
+      document.getElementById('msg').textContent = 'فشل تحميل المشاريع';
+      return;
+    }
+
+    // 5. عرض الجدول بعد نجاح الجلب
+    const tbody = document.querySelector('#projects-table tbody');
+    tbody.innerHTML = '';
+
+    projects.forEach(p => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${p.title}</td>
+        <td>${p.description}</td>
+        <td><select class="status-select"></select></td>
+        <td><button class="info-btn">عرض معلومات الطالب</button></td>
+        <td><button class="download-btn">تحميل PDF</button></td>
+      `;
+      tbody.appendChild(tr);
+
+      const [ , , tdStatus, tdInfo, tdDownload ] = tr.children;
+
+      // بناء قائمة الحالة
+      const select = tdStatus.querySelector('.status-select');
+      ['pending','accepted','rejected'].forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s;
+        opt.textContent = 
+          s==='pending'  ? 'قيد الانتظار' :
+          s==='accepted' ? 'مقبول' : 'مرفوض';
+        if (p.status === s) opt.selected = true;
+        select.appendChild(opt);
+      });
+      select.addEventListener('change', async () => {
+        const r = await fetch(`/api/projects/${p.id}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type':'application/json',
+            'Authorization':`Bearer ${token}`
+          },
+          body: JSON.stringify({ status: select.value })
+        });
+        if (r.status===401||r.status===403) {
+          localStorage.clear();
+          return window.location.replace(loginPage);
+        }
+        if (!r.ok) {
+          const e = await r.json().catch(()=>({message:'فشل تحديث الحالة'}));
+          return document.getElementById('msg').textContent = e.message;
+        }
+        p.status = select.value;
+      });
+
+      // زر معلومات الطالب
+      tdInfo.querySelector('.info-btn').addEventListener('click', () => {
+        if (!p.user) return alert('لا توجد معلومات الطالب');
+        alert(`الاسم: ${p.user.name}\nالبريد: ${p.user.email}\nالهاتف: ${p.user.phone||'غير متوفر'}`);
+      });
+
+      // زر تحميل PDF
+      tdDownload.querySelector('.download-btn').addEventListener('click', async () => {
+        try {
+          const url = `${window.location.origin}/storage/${p.pdf_path}`;
+          const rsp = await fetch(url);
+          if (!rsp.ok) throw new Error('فشل جلب ملف PDF');
+          const blob = await rsp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = p.pdf_path.split('/').pop();
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(blobUrl);
+        } catch (e) {
+          console.error(e);
+          document.getElementById('msg').textContent = e.message;
+        }
+      });
+    });
+  })();
+  </script>
+</body>
+</html>

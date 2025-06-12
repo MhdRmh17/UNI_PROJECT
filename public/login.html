@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>تسجيل الدخول</title>
+  <style>
+    body { font-family: sans-serif; display: flex; align-items: center; justify-content: center; height:100vh; background:#f2f2f2; }
+    form { background:#fff; padding:20px; border-radius:6px; box-shadow:0 2px 8px rgba(0,0,0,0.1); width:300px; }
+    input, button { width:100%; padding:8px; margin:8px 0; border:1px solid #ccc; border-radius:4px; }
+    .error { color:red; font-size:0.9em; }
+  </style>
+</head>
+<body>
+  <form id="login-form">
+    <h2>تسجيل الدخول</h2>
+    <input type="text" id="username" placeholder="اسم المستخدم" required />
+    <input type="password" id="password" placeholder="كلمة المرور" required minlength="6" />
+    <button type="submit">دخول</button>
+    <div id="error" class="error"></div>
+  </form>
+
+  <script>
+  const form = document.getElementById('login-form');
+  const errorDiv = document.getElementById('error');
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    errorDiv.textContent = '';
+
+    const username = form.username.value.trim();
+    const password = form.password.value;
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ username, password })
+      });
+
+      const data = await res.json();
+      console.log('🔑 login response:', data);
+
+      if (!res.ok) {
+        throw new Error(data.message || 'فشل تسجيل الدخول');
+      }
+      if (!data.access_token) {
+        throw new Error('لم نتلقَ رمز توثيق');
+      }
+
+      localStorage.setItem('token', data.access_token);
+      window.location.href = '/dashboard.html';
+
+    } catch (err) {
+      console.error(err);
+      errorDiv.textContent = err.message;
+    }
+  });
+  </script>
+</body>
+</html>
